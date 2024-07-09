@@ -2,23 +2,36 @@ from flask import Flask, request, jsonify, render_template
 from flask_sqlalchemy import SQLAlchemy
 from flask_marshmallow import Marshmallow
 from marshmallow_sqlalchemy import SQLAlchemyAutoSchema
-from flask_bcrypt import Bcrypt
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 import uuid
+import bcrypt
 
-#postgresql://hngtaskdb_user:tVCgst69Orv1m5ihkU9MxSCoQIrQAK5e@dpg-cq4ge6g8fa8c73fp18u0-a.oregon-postgres.render.com/hngtaskdb
 app = Flask(__name__)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://hngtaskdb_user:tVCgst69Orv1m5ihkU9MxSCoQIrQAK5e@dpg-cq4ge6g8fa8c73fp18u0-a.oregon-postgres.render.com/hngtaskdb'
+db_params = {
+    'host': 'SG-hngdb-5711-pgsql-master.servers.mongodirector.com',
+    'user': 'sgpostgres',
+    'password': 'qcp3D9yPoH_9LCSd',
+    'dbname': 'postgres',
+    'port': 5432,
+}
 
+app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql+psycopg2://{db_params['user']}:{db_params['password']}@{db_params['host']}:{db_params['port']}/{db_params['dbname']}"
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = 'hfkjoqieawoepidfeurghjdcdx'
 
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
-bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 
+# Association table
+organisation_users = db.Table('organisation_users',
+    db.Column('user_id', db.String(36), db.ForeignKey('user.user_id'), primary_key=True),
+    db.Column('org_id', db.String(36), db.ForeignKey('organisation.org_id'), primary_key=True)
+)
+
 class User(db.Model):
+    __tablename__ = 'user'
     user_id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()), unique=True)
     first_name = db.Column(db.String(30), nullable=False)
     last_name = db.Column(db.String(30), nullable=False)
@@ -26,16 +39,13 @@ class User(db.Model):
     password = db.Column(db.String(100), nullable=False)
     phone = db.Column(db.String(15))
 
+    organisations = db.relationship('Organisation', secondary=organisation_users, backref='users')
+
 class Organisation(db.Model):
+    __tablename__ = 'organisation'
     org_id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()), unique=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
-    users = db.relationship('User', secondary='organisation_users', backref='organisations')
-
-organisation_users = db.Table('organisation_users',
-    db.Column('user_id', db.String(36), db.ForeignKey('user.user_id'), primary_key=True),
-    db.Column('org_id', db.String(36), db.ForeignKey('organisation.org_id'), primary_key=True)
-)
 
 class UserSchema(SQLAlchemyAutoSchema):
     class Meta:
@@ -60,7 +70,7 @@ def home():
 def register():
     data = request.get_json()
     if not data:
-        return jsonify({'status': 'Bad request', 'error': 'No input data provided', 'statusCode': 422}), 422
+        return {'status': 'Bad request', 'error': 'No input data provided', 'statusCode': 422}
 
     first_name = data.get('first_name')
     last_name = data.get('last_name')
@@ -74,7 +84,7 @@ def register():
     if User.query.filter_by(email=email).first():
         return jsonify({'status': 'Bad request', 'message': 'Registration unsuccessful', 'statusCode': 400}), 400
 
-    hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     new_user = User(first_name=first_name, last_name=last_name, email=email, password=hashed_password, phone=phone)
     db.session.add(new_user)
     db.session.commit()
@@ -102,7 +112,7 @@ def login():
     password = data.get('password')
 
     user = User.query.filter_by(email=email).first()
-    if not user or not bcrypt.check_password_hash(user.password, password):
+    if not user or not bcrypt.checkpw(password.encode('utf-8'), user.password.encode('utf-8')):
         return jsonify({'status': 'Bad request', 'message': 'Authentication failed', 'statusCode': 401}), 401
 
     access_token = create_access_token(identity=user.user_id)
