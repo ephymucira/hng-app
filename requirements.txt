@@ -1,0 +1,7 @@
+flask_sqlalchemy
+flask_marshmallow
+marshmallow_sqlalchemy
+flask_bcrypt 
+py-bcrypt
+psycopg2-binary
+flask_jwt_extended
