@@ -3,11 +3,16 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_marshmallow import Marshmallow
 from marshmallow_sqlalchemy import SQLAlchemyAutoSchema
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_caching import Cache
+from flask_profiler import Profiler
 import uuid
 import bcrypt
+import redis
+from celery import Celery
 
 app = Flask(__name__)
 
+# Database configuration
 db_params = {
     'host': 'SG-hngdb-5711-pgsql-master.servers.mongodirector.com',
     'user': 'sgpostgres',
@@ -15,21 +20,74 @@ db_params = {
     'dbname': 'postgres',
     'port': 5432,
 }
-
 app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql+psycopg2://{db_params['user']}:{db_params['password']}@{db_params['host']}:{db_params['port']}/{db_params['dbname']}"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_size': 10,
+    'max_overflow': 20,
+    'pool_timeout': 30,
+    'pool_recycle': 1800
+}
+
+# JWT configuration
 app.config['JWT_SECRET_KEY'] = 'hfkjoqieawoepidfeurghjdcdx'
+
+# Caching configuration
+app.config['CACHE_TYPE'] = 'redis'
+app.config['CACHE_REDIS_HOST'] = 'localhost'
+app.config['CACHE_REDIS_PORT'] = 6379
+app.config['CACHE_REDIS_DB'] = 0
+app.config['CACHE_REDIS_URL'] = 'redis://localhost:6379/0'
+
+# Celery configuration
+app.config.update(
+    CELERY_BROKER_URL='redis://localhost:6379/0',
+    CELERY_RESULT_BACKEND='redis://localhost:6379/0'
+)
 
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
 jwt = JWTManager(app)
+cache = Cache(app)
 
-# Association table
-organisation_users = db.Table('organisation_users',
-    db.Column('user_id', db.String(36), db.ForeignKey('user.user_id'), primary_key=True),
-    db.Column('org_id', db.String(36), db.ForeignKey('organisation.org_id'), primary_key=True)
-)
+# Flask-Profiler configuration
+app.config["flask_profiler"] = {
+    "enabled": app.config["DEBUG"],
+    "storage": {
+        "engine": "sqlite"
+    },
+    "basicAuth": {
+        "enabled": True,
+        "username": "admin",
+        "password": "admin"
+    },
+    "ignore": [
+        "^/static/.*"
+    ]
+}
 
+profiler = Profiler(app)
+
+def make_celery(app):
+    celery = Celery(
+        app.import_name,
+        backend=app.config['CELERY_RESULT_BACKEND'],
+        broker=app.config['CELERY_BROKER_URL']
+    )
+    celery.conf.update(app.config)
+    TaskBase = celery.Task
+
+    class ContextTask(TaskBase):
+        def __call__(self, *args, **kwargs):
+            with app.app_context():
+                return TaskBase.__call__(self, *args, **kwargs)
+
+    celery.Task = ContextTask
+    return celery
+
+celery = make_celery(app)
+
+# Models and Schemas
 class User(db.Model):
     __tablename__ = 'user'
     user_id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()), unique=True)
@@ -62,6 +120,7 @@ users_schema = UserSchema(many=True)
 organisation_schema = OrganisationSchema()
 organisations_schema = OrganisationSchema(many=True)
 
+# Routes
 @app.route('/')
 def home():
     return render_template('index.html')
@@ -141,6 +200,7 @@ def get_user(user_id):
 
 @app.route('/api/organisations', methods=['GET'])
 @jwt_required()
+@cache.cached(timeout=60)
 def get_organisations():
     current_user_id = get_jwt_identity()
     organisations = Organisation.query.filter(Organisation.users.any(user_id=current_user_id)).all()
@@ -152,6 +212,7 @@ def get_organisations():
 
 @app.route('/api/organisations/<org_id>', methods=['GET'])
 @jwt_required()
+@cache.cached(timeout=60, key_prefix='organisation_{org_id}')
 def get_organisation(org_id):
     current_user_id = get_jwt_identity()
     organisation = Organisation.query.filter_by(org_id=org_id).filter(Organisation.users.any(user_id=current_user_id)).first()
