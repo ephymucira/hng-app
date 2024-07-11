@@ -14,10 +14,4 @@
     ]
 }
 
-{
-  "functions": {
-    "api/users/**/*.js": {
-      "maxDuration": 30
-    }
-  }
-}
+
