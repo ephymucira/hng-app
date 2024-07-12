@@ -10,15 +10,10 @@
     {
       "src": "/(.*)",
       "dest": "app.py"
+    },
+    {
+      "src": "/feedback/:id",
+      "dest": "/api/feedback/:id"
     }
-  ],
-  "functions": {
-    "pages/api/users/**/*.js": {
-      "maxDuration": 30
-    }
-  }
-}
-{
-  "source": "/feedback/:id",
-  "destination": "/api/feedback/:id"
+  ]
 }
