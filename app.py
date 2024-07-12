@@ -66,8 +66,6 @@ app.config["flask_profiler"] = {
     ]
 }
 
-profiler = Profiler(app)
-
 def make_celery(app):
     celery = Celery(
         app.import_name,
@@ -86,6 +84,11 @@ def make_celery(app):
     return celery
 
 celery = make_celery(app)
+
+organisation_users = db.Table('organisation_users',
+    db.Column('user_id', db.String(36), db.ForeignKey('user.user_id'), primary_key=True),
+    db.Column('org_id', db.String(36), db.ForeignKey('organisation.org_id'), primary_key=True)
+)
 
 # Models and Schemas
 class User(db.Model):
@@ -276,4 +279,6 @@ def add_user_to_organisation(org_id):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+        # Initialize the profiler here
+        profiler = Profiler(app)
     app.run(debug=True)
