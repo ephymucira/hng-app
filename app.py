@@ -1,112 +1,53 @@
 from flask import Flask, request, jsonify, render_template
-from flask_sqlalchemy import SQLAlchemy
-from flask_marshmallow import Marshmallow
-from marshmallow_sqlalchemy import SQLAlchemyAutoSchema
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-from flask_caching import Cache
-from flask_profiler import Profiler
 import uuid
 import bcrypt
-import redis
-from celery import Celery
+from flask_sqlalchemy import SQLAlchemy
+from flask_marshmallow import Marshmallow
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from marshmallow_sqlalchemy import SQLAlchemyAutoSchema
+from supabase import create_client
 
 app = Flask(__name__)
 
-# Database configuration
-db_params = {
-    'host': 'SG-hngdb-5711-pgsql-master.servers.mongodirector.com',
-    'user': 'sgpostgres',
-    'password': 'qcp3D9yPoH_9LCSd',
-    'dbname': 'postgres',
-    'port': 5432,
-}
-app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql+psycopg2://{db_params['user']}:{db_params['password']}@{db_params['host']}:{db_params['port']}/{db_params['dbname']}"
+# Supabase configuration
+supabase_url = 'https://your-project-id.supabase.co'
+supabase_key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtandodW9ic29sb2poamJiY3RrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjA3NjQyNzksImV4cCI6MjAzNjM0MDI3OX0.Zry8OLnpoea7b6TwCawxv9hZwSnRLAnBvfAXVAlpeL0'
+
+supabase = create_client(supabase_url, supabase_key)
+
+# Flask app configuration
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///test.db'  # Replace with your actual database URI
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_size': 10,
-    'max_overflow': 20,
-    'pool_timeout': 30,
-    'pool_recycle': 1800
-}
-
-# JWT configuration
-app.config['JWT_SECRET_KEY'] = 'hfkjoqieawoepidfeurghjdcdx'
-
-# Caching configuration
-app.config['CACHE_TYPE'] = 'redis'
-app.config['CACHE_REDIS_HOST'] = 'localhost'
-app.config['CACHE_REDIS_PORT'] = 6379
-app.config['CACHE_REDIS_DB'] = 0
-app.config['CACHE_REDIS_URL'] = 'redis://localhost:6379/0'
-
-# Celery configuration
-app.config.update(
-    CELERY_BROKER_URL='redis://localhost:6379/0',
-    CELERY_RESULT_BACKEND='redis://localhost:6379/0'
-)
+app.config['JWT_SECRET_KEY'] = 'your_jwt_secret_key_here'
 
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
 jwt = JWTManager(app)
-cache = Cache(app)
-
-# Flask-Profiler configuration
-app.config["flask_profiler"] = {
-    "enabled": app.config["DEBUG"],
-    "storage": {
-        "engine": "sqlite"
-    },
-    "basicAuth": {
-        "enabled": True,
-        "username": "admin",
-        "password": "admin"
-    },
-    "ignore": [
-        "^/static/.*"
-    ]
-}
-
-def make_celery(app):
-    celery = Celery(
-        app.import_name,
-        backend=app.config['CELERY_RESULT_BACKEND'],
-        broker=app.config['CELERY_BROKER_URL']
-    )
-    celery.conf.update(app.config)
-    TaskBase = celery.Task
-
-    class ContextTask(TaskBase):
-        def __call__(self, *args, **kwargs):
-            with app.app_context():
-                return TaskBase.__call__(self, *args, **kwargs)
-
-    celery.Task = ContextTask
-    return celery
-
-celery = make_celery(app)
-
-organisation_users = db.Table('organisation_users',
-    db.Column('user_id', db.String(36), db.ForeignKey('user.user_id'), primary_key=True),
-    db.Column('org_id', db.String(36), db.ForeignKey('organisation.org_id'), primary_key=True)
-)
 
 # Models and Schemas
 class User(db.Model):
     __tablename__ = 'user'
-    user_id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()), unique=True)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
     first_name = db.Column(db.String(30), nullable=False)
     last_name = db.Column(db.String(30), nullable=False)
     email = db.Column(db.String(100), unique=True, nullable=False)
     password = db.Column(db.String(100), nullable=False)
     phone = db.Column(db.String(15))
 
-    organisations = db.relationship('Organisation', secondary=organisation_users, backref='users')
+    organisations = db.relationship('Organisation', secondary='organisation_users', backref='users')
 
 class Organisation(db.Model):
     __tablename__ = 'organisation'
-    org_id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()), unique=True)
+    id = db.Column(db.Integer, primary_key=True)
+    org_id = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
+
+organisation_users = db.Table('organisation_users',
+    db.Column('user_id', db.String(36), db.ForeignKey('user.user_id'), primary_key=True),
+    db.Column('org_id', db.String(36), db.ForeignKey('organisation.org_id'), primary_key=True)
+)
 
 class UserSchema(SQLAlchemyAutoSchema):
     class Meta:
@@ -132,7 +73,7 @@ def home():
 def register():
     data = request.get_json()
     if not data:
-        return {'status': 'Bad request', 'error': 'No input data provided', 'statusCode': 422}
+        return jsonify({'status': 'Bad request', 'error': 'No input data provided', 'statusCode': 422})
 
     first_name = data.get('first_name')
     last_name = data.get('last_name')
@@ -141,23 +82,31 @@ def register():
     phone = data.get('phone')
 
     if not first_name or not last_name or not email or not password:
-        return jsonify({'status': 'Bad request', 'error': 'Missing required fields', 'statusCode': 422}), 422
+        return jsonify({'status': 'Bad request', 'error': 'Missing required fields', 'statusCode': 422})
 
-    if User.query.filter_by(email=email).first():
-        return jsonify({'status': 'Bad request', 'message': 'Registration unsuccessful', 'statusCode': 400}), 400
+    # Check if the user already exists
+    existing_user = User.query.filter_by(email=email).first()
+    if existing_user:
+        return jsonify({'status': 'Bad request', 'message': 'Registration unsuccessful', 'statusCode': 400})
 
+    # Hash the password
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+    # Create new user
     new_user = User(first_name=first_name, last_name=last_name, email=email, password=hashed_password, phone=phone)
     db.session.add(new_user)
     db.session.commit()
 
+    # Create an organisation for the user
     org_name = f"{first_name}'s Organisation"
     new_organisation = Organisation(name=org_name)
     new_organisation.users.append(new_user)
     db.session.add(new_organisation)
     db.session.commit()
 
+    # Generate access token
     access_token = create_access_token(identity=new_user.user_id)
+    
     return jsonify({
         'status': 'success',
         'message': 'Registration successful',
@@ -173,11 +122,14 @@ def login():
     email = data.get('email')
     password = data.get('password')
 
+    # Retrieve user from database
     user = User.query.filter_by(email=email).first()
     if not user or not bcrypt.checkpw(password.encode('utf-8'), user.password.encode('utf-8')):
-        return jsonify({'status': 'Bad request', 'message': 'Authentication failed', 'statusCode': 401}), 401
+        return jsonify({'status': 'Bad request', 'message': 'Authentication failed', 'statusCode': 401})
 
+    # Generate access token
     access_token = create_access_token(identity=user.user_id)
+    
     return jsonify({
         'status': 'success',
         'message': 'Login successful',
@@ -185,7 +137,7 @@ def login():
             'accessToken': access_token,
             'user': user_schema.dump(user)
         }
-    }), 201
+    }), 200
 
 @app.route('/api/users/<user_id>', methods=['GET'])
 @jwt_required()
@@ -203,7 +155,6 @@ def get_user(user_id):
 
 @app.route('/api/organisations', methods=['GET'])
 @jwt_required()
-@cache.cached(timeout=60)
 def get_organisations():
     current_user_id = get_jwt_identity()
     organisations = Organisation.query.filter(Organisation.users.any(user_id=current_user_id)).all()
@@ -215,7 +166,6 @@ def get_organisations():
 
 @app.route('/api/organisations/<org_id>', methods=['GET'])
 @jwt_required()
-@cache.cached(timeout=60, key_prefix='organisation_{org_id}')
 def get_organisation(org_id):
     current_user_id = get_jwt_identity()
     organisation = Organisation.query.filter_by(org_id=org_id).filter(Organisation.users.any(user_id=current_user_id)).first()
@@ -279,6 +229,4 @@ def add_user_to_organisation(org_id):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-        # Initialize the profiler here
-        profiler = Profiler(app)
     app.run(debug=True)
