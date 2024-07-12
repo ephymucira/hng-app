@@ -4,3 +4,8 @@ marshmallow_sqlalchemy
 bcrypt
 psycopg2-binary
 flask_jwt_extended
+celery
+redis
+flask_profiler 
+Flask-Caching 
+
