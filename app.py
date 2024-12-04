@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 # Supabase configuration
 supabase_url = 'https://your-project-id.supabase.co'
-supabase_key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtandodW9ic29sb2poamJiY3RrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjA3NjQyNzksImV4cCI6MjAzNjM0MDI3OX0.Zry8OLnpoea7b6TwCawxv9hZwSnRLAnBvfAXVAlpeL0'
+supabase_key = ''
 
 supabase = create_client(supabase_url, supabase_key)
 
